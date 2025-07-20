@@ -7,6 +7,8 @@ Description: Provides yabai window manager keybindings, converted from a Karabin
 --]]
 
 CURRENT_SCRATCHPAD = nil
+CURRENT_LAYOUT = "bsp"
+DEBUG_MODE = false
 
 ---Run command, used in hotkey bindings
 ---@param cmd any
@@ -19,7 +21,7 @@ local function _cmd(cmd)
 			_cmd(v)
 		end
 	elseif type == "string" then
-		local status = hs.execute(cmd, true)
+		local _, status = hs.execute(cmd, true)
 		if not status then
 			hs.printf("Error: command: ", cmd)
 			return false
@@ -37,6 +39,7 @@ end
 ---@param cmd string
 ---@param key? string
 ---@return string|nil
+---@diagnostic disable-next-line:unused-function
 local function _query(cmd, key)
 	local output, status = hs.execute(cmd, true)
 	if not status then
@@ -57,70 +60,81 @@ end
 
 ---Query cuurent space
 ---@return string|nil
+---@diagnostic disable-next-line:unused-function, unused-local
 local function _query_current_space()
 	return _query("yabai -m query --spaces --space")
 end
 
 ---Focus window
----@param direction string
+---@param win string
 ---@return boolean
-local function _focus_window(direction)
-	local cmd = "yabai -m window --fcous " .. direction
-	local status = hs.execute(cmd, true)
-	return status and true or false
-end
-
-local function _is_current_win_stack_last()
-	local stack_last = _query("yabai -m query --windows --window stack.last --space", "id")
-	local current = _query("yabai -m query --windows --window", "id")
-	return stack_last == current
-end
-
-local function _is_current_win_stack_first()
-	local stack_last = _query("yabai -m query --windows --window stack.first --space", "id")
-	local current = _query("yabai -m query --windows --window", "id")
-	return stack_last == current
+local function _focus_window(win)
+	local cmd = "yabai -m window --focus " .. win
+	local _, ok = hs.execute(cmd, true)
+	return ok and true or false
 end
 
 ---Focus window. When in bsp, it goes north/south; when in stack, it goes next/prev
----@param direction string
----| "'up'"
----| "'down'"
+---@param order string
+---| "'prev'"
+---| "'next'"
 ---@return boolean
-local function _focus_vertical_window(direction)
-	local space_info = _query_current_space()
-	if not space_info then
-		hs.printf("Error: Can't get current space information")
-		return false
-	end
-	local dt = nil
-	local type = space_info["type"]
-
-	if type == "bsp" then
-		dt = direction == "up" and "north" or "south"
-	else
-		if direction == "up" then
-			dt = _is_current_win_stack_first() and "last" or "prev"
-		else
-			dt = _is_current_win_stack_last() and "first" or "next"
-		end
+local function _focus_window_order(order)
+	order = CURRENT_LAYOUT == "bsp" and order or "stack." .. order
+	local ok = _focus_window(order)
+	if not ok then
+		order = order == "prev" and "last" or "first"
+		order = CURRENT_LAYOUT == "bsp" and order or "stack." .. order
+		ok = _focus_window(order)
 	end
 
-	local res = _focus_window(dt)
-	local err_msg = "Error: focus window: " .. direction
-	if not res then
+	if not ok then
+		local err_msg = "Error: focus window: " .. order
 		hs.printf(err_msg)
 		return false
 	end
 	return true
 end
 
-local function _focus_window_up()
-	_focus_vertical_window("up")
+local function _focus_window_prev()
+	return _focus_window_order("prev")
 end
 
-local function _focus_window_down()
-	_focus_vertical_window("down")
+local function _focus_window_next()
+	return _focus_window_order("next")
+end
+
+---Focus window with direction
+---@param direction string
+---|"north"
+---|"east"
+---|"south"
+---|"west"
+---@return boolean
+local function _focus_window_direction(direction)
+	local ok = true
+	if CURRENT_LAYOUT == "bsp" then
+		ok = _focus_window(direction)
+	end
+	return ok
+end
+
+---Wrapper for focus window with direction
+---@param direction string
+---|"north"
+---|"east"
+---|"south"
+---|"west"
+---@return function
+local function _focus_window_direction_wrapper(direction)
+	return function()
+		-- local ok = _focus_window_direction(direction)
+		-- if not ok then
+		-- 	hs.printf("Error: focus window with direction: %s", direction)
+		-- end
+		-- return ok
+		return _focus_window_direction(direction)
+	end
 end
 
 local function _center_window()
@@ -161,6 +175,41 @@ local function _resize_and_center_window()
 		h = targetHeight,
 	}
 	win:setFrame(newFrame)
+	return true
+end
+
+---Toggle layout for current space
+---@param layout string
+---| "'bsp'"
+---| "'stack'"
+---@return boolean
+local function _toggle_layout(layout)
+	local _, ok = hs.execute("yabai -m space --layout " .. layout, true)
+
+	if not ok then
+		return false
+	end
+	CURRENT_LAYOUT = layout
+	return true
+end
+
+---Toggle layout bsp for current space
+---@return boolean
+local function _toggle_bsp()
+	local ok = _toggle_layout("bsp")
+	if not ok then
+		hs.printf("Error: toggle layout bsp")
+	end
+	return true
+end
+
+---Toggle layout stack for current space
+---@return boolean
+local function _toggle_stack()
+	local ok = _toggle_layout("stack")
+	if not ok then
+		hs.printf("Error: toggle layout stack")
+	end
 	return true
 end
 
@@ -229,7 +278,7 @@ obj.hotkeys = {
 	-- =================================================================================
 	-- General Window Management
 	-- =================================================================================
-	{ mods = { "alt" }, key = "m", cmd = "yabai -m window --minimize", description = "Yabai: Minimize window" },
+	{ mods = { "alt", "ctrl" }, key = "m", cmd = "yabai -m window --minimize", description = "Yabai: Minimize window" },
 	{
 		mods = { "alt" },
 		key = "s",
@@ -237,33 +286,59 @@ obj.hotkeys = {
 		description = "Yabai: Toggle zoom-fullscreen",
 	},
 	{
-		mods = { "alt", "shift" },
-		key = "s",
+		mods = { "alt", "ctrl" },
+		key = "z",
 		cmd = "yabai -m window --toggle zoom-parent",
 		description = "Yabai: Toggle zoom-parent",
 	},
-	{ mods = { "alt" }, key = "f", cmd = "yabai -m window --toggle float", description = "Yabai: Toggle float" },
-	{ mods = { "alt" }, key = "w", cmd = "yabai -m window --close", description = "Yabai: Close window" },
+	{
+		mods = { "alt", "shift" },
+		key = "f",
+		cmd = "yabai -m window --toggle float",
+		description = "Yabai: Toggle float",
+	},
+	{
+		mods = { "alt" },
+		key = "q",
+		cmd = "yabai -m window --close",
+		description = "Yabai: Close window",
+	},
 
 	-- =================================================================================
 	-- Window Focus (VIM-like)
 	-- =================================================================================
-	{ mods = { "alt" }, key = "h", cmd = "yabai -m window --focus west", description = "Yabai: Focus west" },
-	{ mods = { "alt" }, key = "l", cmd = "yabai -m window --focus east", description = "Yabai: Focus east" },
+	-- { mods = { "alt" }, key = "h", cmd = "yabai -m window --focus west", description = "Yabai: Focus west" },
+	-- { mods = { "alt" }, key = "l", cmd = "yabai -m window --focus east", description = "Yabai: Focus east" },
 	-- This command intelligently handles focus for both BSP and Stack layouts.
 	{
 		mods = { "alt" },
+		key = "h",
+		cmd = _focus_window_direction_wrapper("west"),
+		description = "Yabai: Focus west window",
+	},
+	{
+		mods = { "alt" },
+		key = "l",
+		cmd = _focus_window_direction_wrapper("east"),
+		description = "Yabai: Focus east window",
+	},
+	{
+		mods = { "alt" },
 		key = "j",
-		-- cmd = "[[if [[ $(yabai -m query --spaces --space | jq '.type') == '\"stack\"' ]]; then (if [[ $(yabai -m query --windows --window stack.last --space | jq '.id') -ne $(yabai -m query --windows --window | jq '.id') ]]; then yabai -m window --focus stack.next ; else yabai -m window --focus stack.first; fi); else yabai -m window --focus south ; fi]]",
-		cmd = _focus_window_down,
-		description = "Yabai: Focus south/next",
+		cmd = _focus_window_direction_wrapper("south"),
+		description = "Yabai: Focus south window",
 	},
 	{
 		mods = { "alt" },
 		key = "k",
-		-- cmd = "[[if [[ $(yabai -m query --spaces --space | jq '.type') == '\"stack\"' ]]; then (if [[ $(yabai -m query --windows --window stack.first --space | jq '.id') -ne $(yabai -m query --windows --window | jq '.id') ]]; then yabai -m window --focus stack.prev ; else yabai -m window --focus stack.last; fi); else yabai -m window --focus north ; fi]]",
-		cmd = _focus_window_up,
-		description = "Yabai: Focus north/prev",
+		cmd = _focus_window_direction_wrapper("north"),
+		description = "Yabai: Focus north window",
+	},
+	{
+		mods = { "alt" },
+		key = "w",
+		cmd = "yabai -m window --focus recent",
+		description = "Yabai: Focus recent window",
 	},
 
 	-- =================================================================================
@@ -293,6 +368,12 @@ obj.hotkeys = {
 		cmd = "yabai -m window --swap east",
 		description = "Yabai: Swap window east",
 	},
+	{
+		mods = { "alt", "shift" },
+		key = "w",
+		cmd = "yabai -m window --swap recent",
+		description = "Yabai: Swap recent window",
+	},
 
 	-- =================================================================================
 	-- Window Warping (Move focus without moving window)
@@ -320,6 +401,12 @@ obj.hotkeys = {
 		key = "l",
 		cmd = "yabai -m window --warp east",
 		description = "Yabai: Warp to window east",
+	},
+	{
+		mods = { "alt", "ctrl", "shift" },
+		key = "w",
+		cmd = "yabai -m window --warp recent",
+		description = "Yabai: Swap recent window",
 	},
 
 	-- =================================================================================
@@ -360,7 +447,7 @@ obj.hotkeys = {
 		description = "Yabai: Center window (relative)",
 	},
 	{
-		mods = { "alt" },
+		mods = { "alt", "ctrl" },
 		key = "c",
 		cmd = _center_window,
 		description = "Yabai: Center window",
@@ -370,19 +457,19 @@ obj.hotkeys = {
 	-- Window Properties (Sticky, Topmost, PiP)
 	-- =================================================================================
 	{
-		mods = { "alt", "shift" },
+		mods = { "alt", "ctrl" },
 		key = "p",
 		cmd = "yabai -m window --toggle sticky",
 		description = "Yabai: Toggle sticky",
 	},
 	{
-		mods = { "alt" },
+		mods = { "alt", "shift" },
 		key = "p",
 		cmd = "yabai -m window --toggle topmost",
 		description = "Yabai: Toggle topmost",
 	},
 	{
-		mods = { "alt", "ctrl" },
+		mods = { "alt", "ctrl", "shift" },
 		key = "p",
 		cmd = "yabai -m window --toggle pip",
 		description = "Yabai: Toggle picture-in-picture",
@@ -391,17 +478,17 @@ obj.hotkeys = {
 	-- =================================================================================
 	-- Space Layout Management
 	-- =================================================================================
-	{ mods = { "alt" }, key = "z", cmd = "yabai -m space --equalize", description = "Yabai: Equalize space" },
+	{ mods = { "alt" }, key = "/", cmd = "yabai -m space --equalize", description = "Yabai: Equalize space" },
 	{
 		mods = { "alt", "shift" },
-		key = "z",
-		cmd = "yabai -m space --layout stack",
+		key = "/",
+		cmd = _toggle_stack,
 		description = "Yabai: Set layout to stack",
 	},
 	{
 		mods = { "alt", "ctrl" },
-		key = "z",
-		cmd = "yabai -m space --layout bsp",
+		key = "/",
+		cmd = _toggle_bsp,
 		description = "Yabai: Set layout to bsp",
 	},
 
@@ -442,7 +529,12 @@ obj.hotkeys = {
 		cmd = "yabai -m space --focus prev",
 		description = "Yabai: Focus previous space",
 	},
-	{ mods = { "alt" }, key = "=", cmd = "yabai -m space --focus next", description = "Yabai: Focus next space" },
+	{
+		mods = { "alt" },
+		key = "=",
+		cmd = "yabai -m space --focus next",
+		description = "Yabai: Focus next space",
+	},
 
 	-- =================================================================================
 	-- Move Window to Space
@@ -493,13 +585,13 @@ obj.hotkeys = {
 	-- =================================================================================
 	{
 		mods = { "alt" },
-		key = "escape",
+		key = "tab",
 		cmd = _toggle_current_scratchpad,
 		description = "Yabai: Toggle current scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
-		key = "escape",
+		key = "tab",
 		cmd = "yabai -m window --scratchpad",
 		description = "Yabai: Unset scratchpad on current window",
 	},
@@ -507,27 +599,27 @@ obj.hotkeys = {
 	-- Named Scratchpads
 	{
 		mods = { "alt" },
-		key = "d",
+		key = "e",
 		cmd = _toggle_scratchpad_wrapper("terminal"),
-		description = "Yabai: Toggle 'terminal' scratchpad",
+		description = "Yabai: Toggle 't[e]rminal' scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
-		key = "d",
+		key = "e",
 		cmd = _set_scratchpad_wrapper("terminal"),
-		description = "Yabai: Set 'terminal' scratchpad",
+		description = "Yabai: Set 't[e]rminal' scratchpad",
 	},
 	{
 		mods = { "alt" },
 		key = "a",
 		cmd = _toggle_scratchpad_wrapper("ai"),
-		description = "Yabai: Toggle 'copilot' scratchpad",
+		description = "Yabai: Toggle 'ai' scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
 		key = "a",
 		cmd = _set_scratchpad_wrapper("ai"),
-		description = "Yabai: Set 'copilot' scratchpad",
+		description = "Yabai: Set 'ai' scratchpad",
 	},
 	{
 		mods = { "alt" },
@@ -543,27 +635,51 @@ obj.hotkeys = {
 	},
 	{
 		mods = { "alt" },
-		key = "t",
-		cmd = _toggle_scratchpad_wrapper("todo"),
-		description = "Yabai: Toggle 'todo' scratchpad",
+		key = "d",
+		cmd = _toggle_scratchpad_wrapper("todo-list"),
+		description = "Yabai: Toggle 'to[d]o-l[i]st' scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
-		key = "t",
-		cmd = _set_scratchpad_wrapper("todo"),
-		description = "Yabai: Set 'todo' scratchpad",
+		key = "d",
+		cmd = _set_scratchpad_wrapper("todo-list"),
+		description = "Yabai: Set 'to[d]o-list' scratchpad",
 	},
 	{
 		mods = { "alt" },
 		key = "b",
 		cmd = _toggle_scratchpad_wrapper("browser"),
-		description = "Yabai: Toggle 'browser' scratchpad",
+		description = "Yabai: Toggle 'br[o]wser' scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
 		key = "b",
 		cmd = _set_scratchpad_wrapper("browser"),
-		description = "Yabai: Set 'browser' scratchpad",
+		description = "Yabai: Set 'br[o]wser' scratchpad",
+	},
+	{
+		mods = { "alt" },
+		key = "m",
+		cmd = _toggle_scratchpad_wrapper("mail"),
+		description = "Yabai: Toggle 'mail' scratchpad",
+	},
+	{
+		mods = { "alt", "shift" },
+		key = "m",
+		cmd = _set_scratchpad_wrapper("mail"),
+		description = "Yabai: Set 'mail' scratchpad",
+	},
+	{
+		mods = { "alt" },
+		key = "i",
+		cmd = _toggle_scratchpad_wrapper("instant-messaging"),
+		description = "Yabai: Toggle 'instant-messaging' scratchpad",
+	},
+	{
+		mods = { "alt", "shift" },
+		key = "i",
+		cmd = _set_scratchpad_wrapper("instant-messaging"),
+		description = "Yabai: Set 'instant-messaging' scratchpad",
 	},
 
 	-- =================================================================================
@@ -571,13 +687,13 @@ obj.hotkeys = {
 	-- =================================================================================
 	{
 		mods = { "alt", "ctrl" },
-		key = "r",
+		key = "'",
 		cmd = "yabai --restart-service",
 		description = "Yabai: Restart service",
 	},
 	{
 		mods = { "alt", "shift" },
-		key = "r",
+		key = "'",
 		cmd = "brew services restart borders",
 		description = "Yabai: Restart borders",
 	},
@@ -595,7 +711,7 @@ obj.hotkeys = {
 	},
 	{
 		mods = { "alt" },
-		key = "/",
+		key = ";",
 		cmd = "yabai -m query --windows --window > /tmp/yabai-cur-win.json | neovide /tmp/yabai-cur-win.json; exit",
 		description = "Yabai: Dump window data to Neovide",
 	},
@@ -611,6 +727,10 @@ function obj:init() end
 --- Binds all hotkeys defined in `obj.hotkeys`
 function obj:start()
 	self:stop() -- Stop any existing bindings to prevent duplicates
+
+	-- Init global vars
+	CURRENT_LAYOUT = _query("yabai -m query --spaces --space", "type") or "bsp"
+
 	for _, hotkeyDef in ipairs(self.hotkeys) do
 		local mods = hotkeyDef.mods
 		local key = hotkeyDef.key
@@ -620,7 +740,7 @@ function obj:start()
 		local hotkey = hs.hotkey.bind(mods, key, function()
 			-- hs.execute runs commands in /bin/sh -c, which handles $HOME, &&, etc.
 			local status = _cmd(cmd)
-			if not status then
+			if not status and DEBUG_MODE then
 				hs.printf("Failed: %s", description)
 			end
 		end)
