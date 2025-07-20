@@ -251,13 +251,20 @@ local function _set_scratchpad_wrapper(name)
 	end
 end
 
----Toggle current scratchpad
+---Toggle scratchpad for current window if set, otherwise toggles the most recently used scratchpad.
 ---@return boolean
-local function _toggle_current_scratchpad()
+local function _toggle_recent_scratchpad_or_hide()
+	local name = _query("yabai -m query --windows --window", "scratchpad")
+	local is_pad = (type(name) == "string" and name ~= "") and true or false
+
+	if is_pad then
+		---@diagnostic disable-next-line
+		return _toggle_scratchpad(name)
+	end
+
 	if not CURRENT_SCRATCHPAD then
 		return false
 	end
-
 	return _toggle_scratchpad(CURRENT_SCRATCHPAD)
 end
 
@@ -587,7 +594,7 @@ obj.hotkeys = {
 	{
 		mods = { "alt" },
 		key = "escape",
-		cmd = _toggle_current_scratchpad,
+		cmd = _toggle_recent_scratchpad_or_hide,
 		description = "Yabai: Toggle current scratchpad",
 	},
 	{
