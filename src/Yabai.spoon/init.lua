@@ -262,6 +262,7 @@ local function _toggle_current_scratchpad()
 end
 
 local obj = {}
+obj.__index = obj
 obj.name = "Yabai"
 obj.version = "1.0"
 obj.author = "Tshan Li (Original), AI Conversion"
@@ -585,13 +586,13 @@ obj.hotkeys = {
 	-- =================================================================================
 	{
 		mods = { "alt" },
-		key = "tab",
+		key = "escape",
 		cmd = _toggle_current_scratchpad,
 		description = "Yabai: Toggle current scratchpad",
 	},
 	{
 		mods = { "alt", "shift" },
-		key = "tab",
+		key = "escape",
 		cmd = "yabai -m window --scratchpad",
 		description = "Yabai: Unset scratchpad on current window",
 	},
