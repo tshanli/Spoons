@@ -300,7 +300,7 @@ obj.hotkeys = {
 		description = "Yabai: Toggle zoom-parent",
 	},
 	{
-		mods = { "alt", "shift" },
+		mods = { "alt" },
 		key = "f",
 		cmd = "yabai -m window --toggle float",
 		description = "Yabai: Toggle float",
