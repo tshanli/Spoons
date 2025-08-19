@@ -36,7 +36,7 @@ end
 ---Execute yabai query command. If failed, return nil; if succeed, return decoded json
 ---@param cmd string
 ---@param key? string
----@return string|nil
+---@return table|nil
 ---@diagnostic disable-next-line:unused-function
 local function _query(cmd, key)
 	local output, status = hs.execute(cmd, true)
@@ -54,13 +54,6 @@ local function _query(cmd, key)
 	else
 		return res[key]
 	end
-end
-
----Query cuurent space
----@return string|nil
----@diagnostic disable-next-line:unused-function, unused-local
-local function _query_current_space()
-	return _query("yabai -m query --spaces --space")
 end
 
 ---Focus space
@@ -163,21 +156,19 @@ local function _resize_and_center_window()
 		return false
 	end
 	local screenFrame = win:screen():frame()
-	local targetWidth = math.floor(screenFrame.w * 0.7)
-	local targetHeight = math.floor(screenFrame.h * 0.7)
-	if targetWidth > 1440 then
-		targetWidth = 1440
-	end
-	if targetHeight > 900 then
-		targetHeight = 900
-	end
+	local targetWidth = math.floor(screenFrame.w * 0.78)
+	local targetHeight = math.floor(targetWidth * 0.618)
+	local maxWidth = 1680
+	local maxHeight = maxWidth * 0.618
+	targetWidth = math.min(targetWidth, maxWidth)
+	targetHeight = math.min(targetHeight, maxHeight)
 	local newFrame = {
 		x = screenFrame.x + (screenFrame.w - targetWidth) / 2,
 		y = screenFrame.y + (screenFrame.h - targetHeight) / 2,
 		w = targetWidth,
 		h = targetHeight,
 	}
-	win:setFrame(newFrame)
+	win:setFrame(newFrame, 0)
 	return true
 end
 
@@ -259,6 +250,25 @@ local function _toggle_recent_scratchpad_or_hide()
 	return _toggle_scratchpad(CURRENT_SCRATCHPAD)
 end
 
+local function _close_space_all_windows()
+	local all_wins = _query("yabai -m query --windows --space")
+
+	---@type table|nil
+	if not all_wins and #all_wins == 0 then
+		return false
+	end
+
+	---@diagnostic disable-next-line
+	for _, win in ipairs(all_wins) do
+		local id = win.id
+		local is_scratchpad = win.scratchpad ~= ""
+
+		if not is_scratchpad then
+			_cmd("yabai -m window --close " .. id)
+		end
+	end
+end
+
 local obj = {}
 obj.__index = obj
 obj.name = "Yabai"
@@ -266,6 +276,10 @@ obj.version = "1.0"
 obj.author = "Tshan Li"
 obj.homepage = "https://www.hammerspoon.org"
 obj.description = "Yabai wrapper"
+
+function obj:closeSpaceAllWindows()
+	_close_space_all_windows()
+end
 
 function obj:minimizeWindow()
 	hs.execute("yabai -m window --minimize", true)
